@@ -4,7 +4,11 @@
 #include "WatchAllObjects.h"
 #include "WatchAllObjectRecords.h"
 #include "WatchAllSDKModel.h"
+#include "WatchAllStrings.h"
+#include "WatchAllOutput.h"
 #include <csignal>
+#include <chrono>
+#include <thread>
 
 class ProcessMemoryReader {
 public:
@@ -34,6 +38,11 @@ public:
         }
         out = UObject::getClass(object);
         return out != 0;
+    }
+
+    bool TryReadName(uint32 index, std::string &out) {
+        out = GetFNameFromID(index);
+        return !out.empty() && out != "None";
     }
 };
 
@@ -150,8 +159,6 @@ void HandleWatchSigint(int) {
 }
 
 int RunWatchAll(const string &outputpath, int intervalSeconds) {
-    (void) outputpath;
-
     target_pid = find_pid(pkg.c_str());
     if (target_pid == -1) {
         cout << "watch-all: Can't find the process" << endl;
@@ -175,6 +182,10 @@ int RunWatchAll(const string &outputpath, int intervalSeconds) {
         cout << "watch-all: Please Enter Correct GUObject Addresses!!" << endl;
         return -1;
     }
+    if (Offsets::GNames < 1) {
+        cout << "watch-all: Please Enter Correct GName Addresses!!" << endl;
+        return -1;
+    }
 
     signal(SIGINT, HandleWatchSigint);
     cout << "watch-all: bound to current PID/libUE4.so; interval=" << intervalSeconds
@@ -182,13 +193,17 @@ int RunWatchAll(const string &outputpath, int intervalSeconds) {
 
     WatchAllObjectArraySnapshot snapshot;
     WatchAllObjectRecordStore objectRecords;
+    WatchAllStringTable strings;
     WatchAllSDKWorker sdkWorker(WatchAllParseSDKClassTask);
     sdkWorker.Start();
     ProcessMemoryReader reader;
     WatchAllObjectSnapshotConfig snapshotConfig = MakeWatchAllObjectSnapshotConfig();
+    const auto interval = std::chrono::seconds(intervalSeconds);
 
     while (!gWatchStopRequested) {
+        const auto scanBegin = std::chrono::steady_clock::now();
         if (!PidAlive(target_pid)) {
+            sdkWorker.Stop();
             cout << "watch-all: session aborted; game PID disappeared" << endl;
             return -1;
         }
@@ -206,10 +221,15 @@ int RunWatchAll(const string &outputpath, int intervalSeconds) {
                 }
             }
 
+            const uint32 stringScanLimit = std::min<uint32>(GNameLimit, snapshot.LastNumElements() + 1024);
+            const size_t mergedStrings = WatchAllMergeStringRange(strings, reader, 0, stringScanLimit);
+
             cout << "watch-all: objects=" << snapshot.LastNumElements()
                  << " diffs=" << diffs.size()
                  << " records=" << objectRecords.Records().size()
                  << " new-records=" << newRecords
+                 << " strings=" << strings.Size()
+                 << " string-scan=" << mergedStrings
                  << " sdk-classes=" << sdkWorker.ClassCount()
                  << " sdk-pending=" << sdkWorker.PendingCount() << endl;
             if (isVerbose) {
@@ -222,10 +242,30 @@ int RunWatchAll(const string &outputpath, int intervalSeconds) {
                 }
             }
         }
-        sleep(intervalSeconds);
+
+        const auto scanEnd = std::chrono::steady_clock::now();
+        const auto scanTime = std::chrono::duration_cast<std::chrono::milliseconds>(scanEnd - scanBegin);
+        const auto sleepTime = WatchAllComputeSleep(std::chrono::duration_cast<std::chrono::milliseconds>(interval), scanTime);
+        if (sleepTime.count() > 0 && !gWatchStopRequested) {
+            std::this_thread::sleep_for(sleepTime);
+        }
     }
 
-    cout << "watch-all: stopped by SIGINT" << endl;
+    cout << "watch-all: stopped by SIGINT; draining SDK queue" << endl;
+    sdkWorker.Stop();
+    if (!PidAlive(target_pid)) {
+        cout << "watch-all: session aborted during shutdown; game PID disappeared; output skipped" << endl;
+        return -1;
+    }
+
+    WatchAllOutputBundle bundle = WatchAllBuildOutputBundle(strings, objectRecords.Records(), sdkWorker.ModelSnapshot());
+    WatchAllOutputResult output = WatchAllFinalizeOutputs(outputpath, bundle, true);
+    if (!output.ok) {
+        cout << "watch-all: output failed; old files preserved: " << output.error << endl;
+        return -1;
+    }
+
+    cout << "watch-all: wrote Strings.txt, Objects.txt, SDK.txt, SDK_index.json" << endl;
     return 0;
 }
 const struct option long_options[] = {
