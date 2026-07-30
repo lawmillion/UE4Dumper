@@ -1,7 +1,28 @@
 #include "kmods.h"
 #include "Offsets.h"
 #include "SDK.h"
+#include "WatchAllObjects.h"
 #include <csignal>
+
+class ProcessMemoryReader {
+public:
+    bool TryReadBuffer(void *address, void *buffer, size_t size) {
+        return ::TryReadBuffer(address, buffer, size);
+    }
+};
+
+static WatchAllObjectSnapshotConfig MakeWatchAllObjectSnapshotConfig() {
+    WatchAllObjectSnapshotConfig config{};
+    config.guObjectArray = getRealOffset(Offsets::GUObjectArray);
+    config.fuObjectArrayToTuObjectArray = Offsets::FUObjectArrayToTUObjectArray;
+    config.tuObjectArrayToNumElements = Offsets::TUObjectArrayToNumElements;
+    config.pointerSize = Offsets::PointerSize;
+    config.fuObjectItemSize = Offsets::FUObjectItemSize;
+    config.fuObjectItemPadd = Offsets::FUObjectItemPadd;
+    config.chunkElements = WATCH_ALL_CHUNK_ELEMENTS;
+    config.derefGuObjectArray = deRefGUObjectArray;
+    return config;
+}
 
 using namespace std;
 
@@ -36,14 +57,44 @@ int RunWatchAll(const string &outputpath, int intervalSeconds) {
     cout << "watch-all: Base Address of " << lib_name << " Found At "
          << setbase(16) << libbase << setbase(10) << endl;
 
+    if (!isUE423) {
+        cout << "watch-all: requires --newue chunked GUObjectArray mode" << endl;
+        return -1;
+    }
+    if (Offsets::GUObjectArray < 1) {
+        cout << "watch-all: Please Enter Correct GUObject Addresses!!" << endl;
+        return -1;
+    }
+
     signal(SIGINT, HandleWatchSigint);
     cout << "watch-all: bound to current PID/libUE4.so; interval=" << intervalSeconds
-         << "s. Full scan is not implemented in Task 1." << endl;
+         << "s. Scanning ARM64 --newue chunked GUObjectArray." << endl;
+
+    WatchAllObjectArraySnapshot snapshot;
+    ProcessMemoryReader reader;
+    WatchAllObjectSnapshotConfig snapshotConfig = MakeWatchAllObjectSnapshotConfig();
 
     while (!gWatchStopRequested) {
         if (!PidAlive(target_pid)) {
             cout << "watch-all: session aborted; game PID disappeared" << endl;
             return -1;
+        }
+
+        std::vector<WatchAllObjectDiff> diffs;
+        if (!snapshot.Capture(snapshotConfig, reader, diffs)) {
+            cout << "watch-all: GUObjectArray snapshot failed; keeping previous baseline" << endl;
+        } else {
+            cout << "watch-all: objects=" << snapshot.LastNumElements()
+                 << " diffs=" << diffs.size() << endl;
+            if (isVerbose) {
+                for (const auto &diff : diffs) {
+                    cout << "watch-all: "
+                         << (diff.kind == WatchAllObjectDiffKind::Added ? "added" : "changed")
+                         << " slot=" << diff.index
+                         << " object=0x" << setbase(16) << diff.current.object << setbase(10)
+                         << endl;
+                }
+            }
         }
         sleep(intervalSeconds);
     }
