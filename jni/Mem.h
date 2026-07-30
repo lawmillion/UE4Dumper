@@ -123,7 +123,12 @@ T Read(kaddr address) {
 // Strict typed reader for watch mode. Never use failed data as a valid sample.
 template<typename T>
 bool TryRead(kaddr address, T &out) {
-    return TryReadBuffer(reinterpret_cast<void *>(address), reinterpret_cast<void *>(&out), sizeof(T));
+    T tmp;
+    if (!TryReadBuffer(reinterpret_cast<void *>(address), reinterpret_cast<void *>(&tmp), sizeof(T))) {
+        return false;
+    }
+    out = tmp;
+    return true;
 }
 
 template<typename T>

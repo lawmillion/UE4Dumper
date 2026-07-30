@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <sys/uio.h>
 #include <sys/syscall.h>
+#include <cstring>
+#include <vector>
 
 pid_t target_pid = -1;
 
@@ -55,8 +57,13 @@ bool vm_readv(void *address, void *buffer, size_t size) {
 
 // Strict Process Virtual Memory Reader: succeeds only when all requested bytes are read.
 bool TryReadBuffer(void *address, void *buffer, size_t size) {
-    ssize_t bytes = pvm_partial(address, buffer, size, false);
-    return bytes == (ssize_t) size;
+    vector<char> tmp(size);
+    ssize_t bytes = pvm_partial(address, tmp.data(), size, false);
+    if (bytes != (ssize_t) size) {
+        return false;
+    }
+    memcpy(buffer, tmp.data(), size);
+    return true;
 }
 
 //Process Virtual Memory Writer
