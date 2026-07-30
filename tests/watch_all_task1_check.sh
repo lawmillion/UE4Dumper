@@ -19,7 +19,7 @@ require_pattern() {
 }
 
 require_pattern "$process_h" 'bool[[:space:]]+TryReadBuffer[[:space:]]*\(' 'strict TryReadBuffer API'
-require_pattern "$process_h" 'vector<char>[[:space:]]+tmp' 'TryReadBuffer temporary buffer'
+require_pattern "$process_h" 'std::vector<char>[[:space:]]+tmp' 'TryReadBuffer temporary buffer'
 require_pattern "$process_h" 'memcpy\(buffer,[[:space:]]*tmp\.data\(\)' 'TryReadBuffer commits only after complete read'
 require_pattern "$mem_h" 'bool[[:space:]]+TryRead[[:space:]]*\(' 'strict TryRead<T> API'
 require_pattern "$mem_h" 'T[[:space:]]+tmp' 'TryRead<T> temporary value'

@@ -57,7 +57,7 @@ bool vm_readv(void *address, void *buffer, size_t size) {
 
 // Strict Process Virtual Memory Reader: succeeds only when all requested bytes are read.
 bool TryReadBuffer(void *address, void *buffer, size_t size) {
-    vector<char> tmp(size);
+    std::vector<char> tmp(size);
     ssize_t bytes = pvm_partial(address, tmp.data(), size, false);
     if (bytes != (ssize_t) size) {
         return false;
