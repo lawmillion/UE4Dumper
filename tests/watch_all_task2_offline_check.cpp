@@ -157,6 +157,33 @@ static void test_chunk_pointer_change_survives_failed_rebuild_attempt() {
     assert(diffs[0].index == 0 && diffs[0].kind == WatchAllObjectDiffKind::Changed);
 }
 
+static void test_failed_chunk_read_keeps_pointer_baseline() {
+    FakeReader reader;
+    WatchAllObjectArraySnapshot snapshot;
+    const kaddr gu = 0x140000;
+    const kaddr table = 0x250000;
+    const kaddr chunk = 0x360000;
+    kaddr chunks[] = {chunk};
+    PutHeader(reader, gu, table, 2);
+    reader.Put(table, chunks, sizeof(chunks));
+    PutItems(reader, chunk, {Item(0x501, 1, 0, 1), Item(0x502, 1, 0, 2)});
+
+    std::vector<WatchAllObjectDiff> diffs;
+    assert(snapshot.Capture(Config(gu), reader, diffs));
+    assert(diffs.size() == 2);
+
+    reader.failByAddress[chunk] = 8;
+    reader.failByAddress[chunk + sizeof(WatchAllObjectItem)] = 8;
+    diffs.clear();
+    assert(snapshot.Capture(Config(gu), reader, diffs));
+    assert(diffs.empty());
+
+    reader.failByAddress.clear();
+    diffs.clear();
+    assert(snapshot.Capture(Config(gu), reader, diffs));
+    assert(diffs.empty());
+}
+
 static void test_last_chunk_reads_only_valid_elements() {
     FakeReader reader;
     WatchAllObjectArraySnapshot snapshot;
@@ -190,6 +217,7 @@ int main() {
     test_detects_added_and_changed_slots();
     test_failed_batch_does_not_overwrite_previous_slot();
     test_chunk_pointer_change_survives_failed_rebuild_attempt();
+    test_failed_chunk_read_keeps_pointer_baseline();
     test_last_chunk_reads_only_valid_elements();
     std::cout << "watch-all task 2 offline checks passed" << std::endl;
     return 0;

@@ -16,7 +16,7 @@ static const uint32 WATCH_ALL_CHUNK_ELEMENTS = 0x10000;
 static const uint32 WATCH_ALL_FU_OBJECT_ITEM_SIZE_ARM64 = 0x18;
 
 struct WatchAllObjectItem {
-    kaddr object;
+    uint64_t object;
     uint32 flags;
     uint32 clusterRootIndex;
     uint32 serialNumber;
@@ -153,12 +153,15 @@ public:
             }
         }
 
-        chunkPointers_.resize(chunkCount, 0);
+        std::vector<kaddr> nextChunkPointers(chunkCount, 0);
         for (uint32 chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex) {
             if (chunkReadComplete[chunkIndex]) {
-                chunkPointers_[chunkIndex] = chunkPointers[chunkIndex];
+                nextChunkPointers[chunkIndex] = chunkPointers[chunkIndex];
+            } else if (chunkIndex < chunkPointers_.size()) {
+                nextChunkPointers[chunkIndex] = chunkPointers_[chunkIndex];
             }
         }
+        chunkPointers_.swap(nextChunkPointers);
         lastNumElements_ = numElements;
         return true;
     }
