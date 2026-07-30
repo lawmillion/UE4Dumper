@@ -194,64 +194,19 @@ int main(int argc, char *argv[]) {
          << endl;
 
     if (isLibDump) {
-        //Lib End Address
-        kaddr start_addr = libbase;
-        kaddr end_addr = get_module_end(lib_name);
-        if (end_addr == 0) {
-            cout << "Can't find End of Library: " << lib_name << endl;
-            return -1;
-        }
-        cout << "End Address of " << lib_name << " Found At " << setbase(16) << end_addr
-             << setbase(10) << endl;
-
-        //Lib Dump
-        size_t libsize = (end_addr - libbase);
-        cout << "Lib Size: " << libsize << endl;
+        kaddr dumpBase = 0;
+        kaddr dumpEnd = 0;
 
         if (isRawDump) {
-            ofstream rdump(outputpath + "/" + lib_name, ofstream::out | ofstream::binary);
-            if (rdump.is_open()) {
-                if (isFastDump) {
-                    auto *buffer = new uint8_t[libsize];
-                    memset(buffer, '\0', libsize);
-                    vm_readv((void *) start_addr, buffer, libsize);
-                    rdump.write((char *) buffer, libsize);
-                } else {
-                    char *buffer = new char[1];
-                    while (libsize != 0) {
-                        vm_readv((void *) (start_addr++), buffer, 1);
-                        rdump.write(buffer, 1);
-                        --libsize;
-                    }
-                }
-            } else {
-                cout << "Can't Output File" << endl;
-                return -1;
+            string rawPath = outputpath + "/" + lib_name;
+            if (!dump_module_by_maps(lib_name, rawPath, dumpBase, dumpEnd)) {
+                cout << "Raw dump completed with read gaps; output keeps zero-filled gaps" << endl;
             }
-            rdump.close();
         } else {
             string tempPath = outputpath + "/KTemp.dat";
-
-            ofstream ldump(tempPath, ofstream::out | ofstream::binary);
-            if (ldump.is_open()) {
-                if (isFastDump) {
-                    auto *buffer = new uint8_t[libsize];
-                    memset(buffer, '\0', libsize);
-                    vm_readv((void *) start_addr, buffer, libsize);
-                    ldump.write((char *) buffer, libsize);
-                } else {
-                    char *buffer = new char[1];
-                    while (libsize != 0) {
-                        vm_readv((void *) (start_addr++), buffer, 1);
-                        ldump.write(buffer, 1);
-                        --libsize;
-                    }
-                }
-            } else {
-                cout << "Can't Output File" << endl;
-                return -1;
+            if (!dump_module_by_maps(lib_name, tempPath, dumpBase, dumpEnd)) {
+                cout << "Dump completed with read gaps; rebuilding may still be incomplete" << endl;
             }
-            ldump.close();
 
             //SoFixer Code//
             cout << "Rebuilding Elf(So)" << endl;
@@ -259,12 +214,12 @@ int main(int argc, char *argv[]) {
 #if defined(__LP64__)
             string outPath = outputpath + "/" + lib_name;
 
-            fix_so(tempPath.c_str(), outPath.c_str(), start_addr);
+            fix_so(tempPath.c_str(), outPath.c_str(), dumpBase);
 #else
             ElfReader elf_reader;
 
             elf_reader.setDumpSoFile(true);
-            elf_reader.setDumpSoBaseAddr(start_addr);
+            elf_reader.setDumpSoBaseAddr(dumpBase);
 
             auto file = fopen(tempPath.c_str(), "rb");
             if (nullptr == file) {

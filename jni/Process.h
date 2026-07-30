@@ -11,7 +11,7 @@ pid_t target_pid = -1;
  * https://man7.org/linux/man-pages/man2/process_vm_readv.2.html
  * Syscall Implementation of process_vm_readv & process_vm_writev
  */
-bool pvm(void *address, void *buffer, size_t size, bool iswrite) {
+ssize_t pvm_partial(void *address, void *buffer, size_t size, bool iswrite) {
     struct iovec local[1];
     struct iovec remote[1];
 
@@ -21,7 +21,7 @@ bool pvm(void *address, void *buffer, size_t size, bool iswrite) {
     remote[0].iov_len = size;
 
     if (target_pid < 0) {
-        return false;
+        return -1;
     }
 
 #if defined(__arm__)
@@ -38,10 +38,14 @@ bool pvm(void *address, void *buffer, size_t size, bool iswrite) {
     int process_vm_writev_syscall = 311;
 #endif
 
-    ssize_t bytes = syscall((iswrite ? process_vm_writev_syscall : process_vm_readv_syscall),
-                            target_pid, local, 1, remote, 1, 0);
+    return syscall((iswrite ? process_vm_writev_syscall : process_vm_readv_syscall),
+                   target_pid, local, 1, remote, 1, 0);
+}
+
+bool pvm(void *address, void *buffer, size_t size, bool iswrite) {
+    ssize_t bytes = pvm_partial(address, buffer, size, iswrite);
     //printf("process_vm_readv reads %zd bytes from PID: %d\n", bytes, target_pid);
-    return bytes == size;
+    return bytes == (ssize_t) size;
 }
 
 //Process Virtual Memory Reader

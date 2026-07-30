@@ -17,6 +17,8 @@
 #include <fstream>
 #include <getopt.h>
 #include <codecvt>
+#include <cerrno>
+#include <cstring>
 
 #include "Log.h"
 #include "Process.h"
@@ -41,6 +43,103 @@ bool deRefGNames = true;
 bool deRefGUObjectArray = false;
 string pkg("com.tencent.ig");
 static const char *lib_name = "libUE4.so";
+
+struct ModuleMapSegment {
+    kaddr start;
+    kaddr end;
+    kaddr fileOffset;
+    string perms;
+};
+
+vector<ModuleMapSegment> get_module_segments(const char *module_name) {
+    vector<ModuleMapSegment> segments;
+    FILE *fp;
+    char filename[32], buffer[1024];
+    snprintf(filename, sizeof(filename), "/proc/%d/maps", target_pid);
+    fp = fopen(filename, "rt");
+    if (fp == nullptr) {
+        return segments;
+    }
+
+    while (fgets(buffer, sizeof(buffer), fp)) {
+        if (!strstr(buffer, module_name)) {
+            continue;
+        }
+
+        ModuleMapSegment seg{};
+        char perms[8] = {0};
+#if defined(__LP64__)
+        if (sscanf(buffer, "%lx-%lx %7s %lx", &seg.start, &seg.end, perms, &seg.fileOffset) != 4) {
+#else
+        if (sscanf(buffer, "%x-%x %7s %x", &seg.start, &seg.end, perms, &seg.fileOffset) != 4) {
+#endif
+            continue;
+        }
+        seg.perms = perms;
+        segments.push_back(seg);
+    }
+    fclose(fp);
+    sort(segments.begin(), segments.end(), [](const ModuleMapSegment &a, const ModuleMapSegment &b) {
+        return a.start < b.start;
+    });
+    return segments;
+}
+
+bool dump_module_by_maps(const char *module_name, const string &outPath, kaddr &baseOut, kaddr &endOut) {
+    auto segments = get_module_segments(module_name);
+    if (segments.empty()) {
+        cout << "Can't find maps for " << module_name << endl;
+        return false;
+    }
+
+    baseOut = segments.front().start;
+    endOut = segments.back().end;
+    size_t imageSize = endOut - baseOut;
+    cout << "Module maps segments: " << segments.size() << endl;
+    cout << "Module span: " << setbase(16) << baseOut << "-" << endOut << setbase(10)
+         << " Size: " << imageSize << endl;
+
+    vector<uint8_t> image(imageSize, 0);
+    size_t totalRead = 0;
+    int failedSegments = 0;
+
+    for (const auto &seg : segments) {
+        size_t segSize = seg.end - seg.start;
+        size_t dstOff = seg.start - baseOut;
+        errno = 0;
+        ssize_t bytes = pvm_partial((void *) seg.start, image.data() + dstOff, segSize, false);
+        if (bytes < 0) {
+            failedSegments++;
+            cout << "Read failed " << setbase(16) << seg.start << "-" << seg.end
+                 << " off=" << seg.fileOffset << setbase(10)
+                 << " perms=" << seg.perms << " errno=" << errno << " (" << strerror(errno) << ")" << endl;
+            continue;
+        }
+        totalRead += (size_t) bytes;
+        if ((size_t) bytes != segSize) {
+            failedSegments++;
+            cout << "Partial read " << setbase(16) << seg.start << "-" << seg.end
+                 << " off=" << seg.fileOffset << setbase(10)
+                 << " perms=" << seg.perms << " got=" << bytes << " need=" << segSize << endl;
+        } else if (isVerbose) {
+            cout << "Read segment " << setbase(16) << seg.start << "-" << seg.end
+                 << " off=" << seg.fileOffset << setbase(10)
+                 << " perms=" << seg.perms << " bytes=" << bytes << endl;
+        }
+    }
+
+    ofstream out(outPath, ofstream::out | ofstream::binary);
+    if (!out.is_open()) {
+        cout << "Can't Output File" << endl;
+        return false;
+    }
+    out.write((char *) image.data(), image.size());
+    out.close();
+
+    cout << "Dumped bytes: " << totalRead << " / " << imageSize
+         << ", failed/partial segments: " << failedSegments << endl;
+    return failedSegments == 0;
+}
 
 bool isStartWith(const string& str, const char *check) {
     return (str.rfind(check, 0) == 0);

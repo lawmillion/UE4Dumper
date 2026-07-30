@@ -130,7 +130,20 @@ struct UStruct {
         string classname = UObject::getName(clazz);
 
         kaddr superclass = getSuperClass(clazz);
+        int guard = 0;
         while (superclass) {
+            if (guard++ >= 128) {
+                classname += ".<super-loop>";
+                break;
+            }
+#if defined(__LP64__)
+            if (superclass < 0x1000000000 || superclass > 0x8000000000 || UObject::getNameID(superclass) == 0) {
+#else
+            if (superclass < 0x10000 || UObject::getNameID(superclass) == 0) {
+#endif
+                classname += ".<bad-super>";
+                break;
+            }
             classname += ".";
             classname += UObject::getName(superclass);
 
@@ -144,7 +157,20 @@ struct UStruct {
         string classname = UObject::getName(clazz);
 
         kaddr superclass = getSuperClass(clazz);
+        int guard = 0;
         while (superclass) {
+            if (guard++ >= 128) {
+                classname += ".<super-loop>";
+                break;
+            }
+#if defined(__LP64__)
+            if (superclass < 0x1000000000 || superclass > 0x8000000000 || UObject::getNameID(superclass) == 0) {
+#else
+            if (superclass < 0x10000 || UObject::getNameID(superclass) == 0) {
+#endif
+                classname += ".<bad-super>";
+                break;
+            }
             classname += ".";
             classname += UObject::getName(superclass);
 

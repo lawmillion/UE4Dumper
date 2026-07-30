@@ -149,7 +149,52 @@ string resolveProp423(list<kaddr> &recurrce, kaddr prop) {
 
 //---------------------------------------------------------------------------------------------------------------------------//
 
+static bool sdkIsLikelyPointer(kaddr addr) {
+#if defined(__LP64__)
+    return addr > 0x1000000000 && addr < 0x8000000000;
+#else
+    return addr > 0x10000;
+#endif
+}
+
+static bool sdkIsValidFField(kaddr field) {
+    if (!sdkIsLikelyPointer(field)) {
+        return false;
+    }
+    kaddr fieldClass = getPtr(field + Offsets::FFieldToClass);
+    uint32 nameId = Read<uint32>(field + Offsets::FFieldToName);
+    return sdkIsLikelyPointer(fieldClass) && nameId > 0 && nameId < 0x200000;
+}
+
+static bool sdkIsValidUField(kaddr field) {
+    return UObject::isValid(field);
+}
+
+static bool sdkIsValidUStruct(kaddr clazz) {
+    return UObject::isValid(clazz) && sdkIsLikelyPointer(clazz);
+}
+
 uint32 classCount = 0;
+
+static bool isSdkDebug = true;
+
+static void sdkLogProgress(const char *stage, kaddr addr, const string &name, const string &clazz) {
+    if (!isSdkDebug) {
+        return;
+    }
+    cout << "[SDK] " << stage << " addr=0x" << setbase(16) << addr << setbase(10)
+         << " name=" << name << " class=" << clazz << endl;
+    cout.flush();
+}
+
+static bool sdkGuardExceeded(const char *stage, kaddr owner, int guard) {
+    if (guard < 4096) {
+        return false;
+    }
+    cout << "[SDK][WARN] " << stage << " loop guard hit owner=0x" << setbase(16) << owner << setbase(10) << endl;
+    cout.flush();
+    return true;
+}
 
 vector<uint32> structIDMap;
 
@@ -359,10 +404,21 @@ list<kaddr> writeStructChild(ofstream &sdk, kaddr childprop) {
 list<kaddr> writeStructChild423(ofstream &sdk, kaddr childprop) {
     list<kaddr> recurrce;
     kaddr child = childprop;
+    int guard = 0;
     while (child) {
+        if (sdkGuardExceeded("childprops", childprop, guard++)) {
+            break;
+        }
+        if (!sdkIsValidFField(child)) {
+            cout << "[SDK][WARN] invalid FField child=0x" << setbase(16) << child
+                 << " owner=0x" << childprop << setbase(10) << endl;
+            cout.flush();
+            break;
+        }
         kaddr prop = child;
         string oname = FField::getName(prop);
         string cname = FField::getClassName(prop);
+        sdkLogProgress("prop", prop, oname, cname);
 
         if (isEqual(cname, "ObjectProperty") || isEqual(cname, "WeakObjectProperty") ||
             isEqual(cname, "LazyObjectProperty") || isEqual(cname, "AssetObjectProperty") ||
@@ -500,17 +556,41 @@ list<kaddr> writeStructChild423(ofstream &sdk, kaddr childprop) {
 list<kaddr> writeStructChild423_Func(ofstream &sdk, kaddr childprop) {
     list<kaddr> recurrce;
     kaddr child = childprop;
+    int guard = 0;
     while (child) {
+        if (sdkGuardExceeded("children", childprop, guard++)) {
+            break;
+        }
+        if (!sdkIsValidUField(child)) {
+            cout << "[SDK][WARN] invalid UField child=0x" << setbase(16) << child
+                 << " owner=0x" << childprop << setbase(10) << endl;
+            cout.flush();
+            break;
+        }
         kaddr prop = child;
         string oname = UObject::getName(prop);
         string cname = UObject::getClassName(prop);
+        sdkLogProgress("child", prop, oname, cname);
 
         if (isStartWith(cname, "Function") || isEqual(cname, "DelegateFunction")) {
             string returnVal = "void";
             string params;
 
             kaddr funcParam = UStruct::getChildProperties(prop);
+            int funcGuard = 0;
             while (funcParam) {
+                if (sdkGuardExceeded("funcparams", prop, funcGuard++)) {
+                    break;
+                }
+                if (!sdkIsValidFField(funcParam)) {
+                    cout << "[SDK][WARN] invalid funcparam=0x" << setbase(16) << funcParam
+                         << " owner=0x" << prop << setbase(10) << endl;
+                    cout.flush();
+                    break;
+                }
+                string paramName = FField::getName(funcParam);
+                string paramClass = FField::getClassName(funcParam);
+                sdkLogProgress("funcparam", funcParam, paramName, paramClass);
                 uint64 PropertyFlags = UProperty::getPropertyFlags(funcParam);
 
                 if ((PropertyFlags & 0x0000000000000400) == 0x0000000000000400) {
@@ -589,9 +669,26 @@ void writeStruct(ofstream &sdk, kaddr clazz) {
     list<kaddr> recurrce;
 
     kaddr currStruct = clazz;
+    int superGuard = 0;
     while (UObject::isValid(currStruct)) {
+        if (sdkGuardExceeded("super", clazz, superGuard++)) {
+            break;
+        }
+        sdkLogProgress("super-check", currStruct, "<before-name>", "");
         string name = UObject::getName(currStruct);
         if (isStartWith(name, "None") || isContain(name, "/Game/") || isContain(name, "_png") || name.empty()) {
+            // 诊断：记录被该过滤吃掉的对象，事后用 grep "[SDK][FILTER]" 看分布
+            const char *reason = "other";
+            if (isStartWith(name, "None")) reason = "None";
+            else if (isContain(name, "/Game/")) reason = "/Game/";
+            else if (isContain(name, "_png")) reason = "_png";
+            else if (name.empty()) reason = "empty";
+            cout << "[SDK][FILTER] reason=" << reason
+                 << " name=" << name
+                 << " addr=0x" << setbase(16) << currStruct
+                 << " clazzRoot=0x" << clazz
+                 << " depth=" << setbase(10) << superGuard << endl;
+            cout.flush();
             break;
         }
 
@@ -608,7 +705,10 @@ void writeStruct(ofstream &sdk, kaddr clazz) {
 
             //Dumping
             structIDMap.push_back(NameID);
-            sdk << "Class: " << UStruct::getStructClassPath(currStruct) << endl;
+            sdkLogProgress("struct-before-classpath", currStruct, name, "");
+            string classPath = UStruct::getStructClassPath(currStruct);
+            sdkLogProgress("struct", currStruct, name, classPath);
+            sdk << "Class: " << classPath << endl;
             if (isUE423) {
                 recurrce.merge(writeStructChild423(sdk, UStruct::getChildProperties(currStruct)));
                 recurrce.merge(writeStructChild423_Func(sdk, UStruct::getChildren(currStruct)));
@@ -643,7 +743,15 @@ void DumpSDK(const string& out) {
         }
         for (int32 i = 0; i < oCount; i++) {
             kaddr uobj = GetUObjectFromID(i);
+            if ((i % 100) == 0) {
+                cout << "[SDK] object-index=" << setbase(10) << i << "/" << oCount
+                     << " uobj=0x" << setbase(16) << uobj << setbase(10) << endl;
+                cout.flush();
+            }
             if (UObject::isValid(uobj)) {
+                string objName = UObject::getName(uobj);
+                string objClass = UObject::getClassName(uobj);
+                sdkLogProgress("object", uobj, objName, objClass);
                 writeStruct(sdk, UObject::getClass(uobj));
             }
         }

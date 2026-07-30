@@ -249,11 +249,40 @@ namespace Offsets {
         //Class: TUObjectArray
         TUObjectArrayToNumElements = 0x14;
         //Class: UStruct
-        UStructToChildProperties = 0x44;
+        UStructToSuperStruct = 0x40;
+        UStructToChildren = 0x48;
+        UStructToChildProperties = 0x50;
         //Class: FField
         FFieldToClass = 0x8;
         FFieldToNext = 0x20;
         FFieldToName = 0x28;
+        //Class: FProperty
+        UPropertyToElementSize = 0x38;
+        UPropertyToPropertyFlags = 0x40;
+        UPropertyToOffsetInternal = 0x4C;
+        //Class: UBoolProperty
+        UBoolPropertyToFieldSize = 0x78;
+        UBoolPropertyToByteOffset = 0x79;
+        UBoolPropertyToByteMask = 0x7A;
+        UBoolPropertyToFieldMask = 0x7B;
+        //Class: UObjectProperty
+        UObjectPropertyToPropertyClass = 0x78;
+        //Class: UClassProperty
+        UClassPropertyToMetaClass = 0x80;
+        //Class: UInterfaceProperty
+        UInterfacePropertyToInterfaceClass = 0x80;
+        //Class: UArrayProperty
+        UArrayPropertyToInnerProperty = 0x78;
+        //Class: UMapProperty
+        UMapPropertyToKeyProp = 0x78;
+        UMapPropertyToValueProp = 0x80;
+        //Class: USetProperty
+        USetPropertyToElementProp = 0x78;
+        //Class: UStructProperty
+        UStructPropertyToStruct = 0x78;
+        //Class: UFunction
+        UFunctionToFunctionFlags = 0xB0;
+        UFunctionToFunc = 0xD8;
     }
 
     void patchCustom_64() {
