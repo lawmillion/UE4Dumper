@@ -2,12 +2,37 @@
 #include "Offsets.h"
 #include "SDK.h"
 #include "WatchAllObjects.h"
+#include "WatchAllObjectRecords.h"
 #include <csignal>
 
 class ProcessMemoryReader {
 public:
     bool TryReadBuffer(void *address, void *buffer, size_t size) {
         return ::TryReadBuffer(address, buffer, size);
+    }
+
+    bool TryReadObjectName(kaddr object, std::string &out) {
+        if (!UObject::isValid(object)) {
+            return false;
+        }
+        out = UObject::getName(object);
+        return !out.empty() && out != "None";
+    }
+
+    bool TryReadObjectOuter(kaddr object, kaddr &out) {
+        if (!UObject::isValid(object)) {
+            return false;
+        }
+        out = UObject::getOuter(object);
+        return true;
+    }
+
+    bool TryReadObjectClass(kaddr object, kaddr &out) {
+        if (!UObject::isValid(object)) {
+            return false;
+        }
+        out = UObject::getClass(object);
+        return out != 0;
     }
 };
 
@@ -71,6 +96,7 @@ int RunWatchAll(const string &outputpath, int intervalSeconds) {
          << "s. Scanning ARM64 --newue chunked GUObjectArray." << endl;
 
     WatchAllObjectArraySnapshot snapshot;
+    WatchAllObjectRecordStore objectRecords;
     ProcessMemoryReader reader;
     WatchAllObjectSnapshotConfig snapshotConfig = MakeWatchAllObjectSnapshotConfig();
 
@@ -84,8 +110,18 @@ int RunWatchAll(const string &outputpath, int intervalSeconds) {
         if (!snapshot.Capture(snapshotConfig, reader, diffs)) {
             cout << "watch-all: GUObjectArray snapshot failed; keeping previous baseline" << endl;
         } else {
+            size_t newRecords = 0;
+            for (const auto &diff : diffs) {
+                const WatchAllObjectRecord *record = objectRecords.AddDiff(reader, diff);
+                if (record != nullptr) {
+                    ++newRecords;
+                }
+            }
+
             cout << "watch-all: objects=" << snapshot.LastNumElements()
-                 << " diffs=" << diffs.size() << endl;
+                 << " diffs=" << diffs.size()
+                 << " records=" << objectRecords.Records().size()
+                 << " new-records=" << newRecords << endl;
             if (isVerbose) {
                 for (const auto &diff : diffs) {
                     cout << "watch-all: "
