@@ -99,17 +99,40 @@ static void test_function_conflicts_all_preserved_and_duplicates_deduped() {
     assert(model.Classes()[0].functions.size() == 4);
 }
 
-static void test_worker_queue_builds_single_class_model() {
+static void test_first_merge_dedupes_duplicate_field_and_function_signatures() {
+    WatchAllSDKModel model;
+    WatchAllSDKClass clazz = Class("/Game/A", "BP_Monster_C", 0x1000);
+    clazz.fields.push_back(Field("Damage", "int", 0x120, 4));
+    clazz.fields.push_back(Field("Damage", "int", 0x120, 4));
+    clazz.functions.push_back(Function("Hit", "void", "int Damage", 0x100));
+    clazz.functions.push_back(Function("Hit", "void", "int Damage", 0x100));
+
+    assert(model.MergeClass(clazz));
+    assert(model.Classes()[0].fields.size() == 1);
+    assert(model.Classes()[0].functions.size() == 1);
+}
+
+static WatchAllSDKClass ParseClassTask(const WatchAllSDKClassTask &task) {
+    WatchAllSDKClass clazz = Class(task.classKey.outerPath, task.classKey.className, task.classPtr);
+    clazz.fields.push_back(Field("Damage", "int", 0x120, 4));
+    clazz.functions.push_back(Function("Hit", "void", "int Damage", 0x100));
+    return clazz;
+}
+
+static void test_worker_parser_populates_structured_model() {
     WatchAllObjectRecord record{};
     record.classPtr = 0x1000;
     record.classOuterPath = "/Game/A";
     record.className = "BP_Monster_C";
 
-    WatchAllSDKWorker worker;
+    WatchAllSDKWorker worker(ParseClassTask);
     worker.Start();
     assert(worker.Submit(record));
     worker.Stop();
-    assert(worker.ClassCount() == 1);
+    WatchAllSDKModel model = worker.ModelSnapshot();
+    assert(model.Classes().size() == 1);
+    assert(model.Classes()[0].fields.size() == 1);
+    assert(model.Classes()[0].functions.size() == 1);
     assert(worker.PendingCount() == 0);
 }
 
@@ -117,9 +140,10 @@ int main() {
     test_same_name_different_outer_not_merged();
     test_same_class_new_pointer_reparsed_and_kept();
     test_duplicate_field_signature_dedupes();
+    test_first_merge_dedupes_duplicate_field_and_function_signatures();
     test_field_conflicts_all_preserved();
     test_function_conflicts_all_preserved_and_duplicates_deduped();
-    test_worker_queue_builds_single_class_model();
+    test_worker_parser_populates_structured_model();
     std::cout << "watch-all task 4 offline checks passed" << std::endl;
     return 0;
 }

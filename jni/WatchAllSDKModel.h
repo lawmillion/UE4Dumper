@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <set>
 #include <sstream>
@@ -93,22 +94,13 @@ public:
         const std::string classKey = incoming.key.Signature();
         WatchAllSDKClass *target = FindClass(classKey);
         if (target == nullptr) {
-            classes_.push_back(incoming);
-            target = &classes_.back();
-            if (target->classPtr != 0) {
-                target->classPointers.push_back(target->classPtr);
-            }
+            WatchAllSDKClass empty;
+            empty.key = incoming.key;
+            empty.classPtr = incoming.classPtr;
+            classes_.push_back(empty);
             fieldSignatures_.push_back(std::set<std::string>());
             functionSignatures_.push_back(std::set<std::string>());
-            const size_t index = classes_.size() - 1;
-            bool changed = true;
-            for (const auto &field : target->fields) {
-                fieldSignatures_[index].insert(field.Signature());
-            }
-            for (const auto &function : target->functions) {
-                functionSignatures_[index].insert(function.Signature());
-            }
-            return changed;
+            target = &classes_.back();
         }
 
         const size_t index = static_cast<size_t>(target - classes_.data());
@@ -228,7 +220,10 @@ private:
 
 class WatchAllSDKWorker {
 public:
-    WatchAllSDKWorker() : running_(false) {}
+    typedef std::function<WatchAllSDKClass(const WatchAllSDKClassTask &)> Parser;
+
+    WatchAllSDKWorker() : parser_(DefaultParseClass), running_(false) {}
+    explicit WatchAllSDKWorker(Parser parser) : parser_(parser), running_(false) {}
     ~WatchAllSDKWorker() { Stop(); }
 
     void Start() {
@@ -260,15 +255,23 @@ public:
         return model_.Classes().size();
     }
 
-    const WatchAllSDKModel &Model() const { return model_; }
+    WatchAllSDKModel ModelSnapshot() const {
+        std::lock_guard<std::mutex> lock(modelMutex_);
+        return model_;
+    }
 
 private:
+    static WatchAllSDKClass DefaultParseClass(const WatchAllSDKClassTask &task) {
+        WatchAllSDKClass clazz;
+        clazz.key = task.classKey;
+        clazz.classPtr = task.classPtr;
+        return clazz;
+    }
+
     void Run() {
         WatchAllSDKClassTask task;
         while (queue_.WaitPop(task)) {
-            WatchAllSDKClass clazz;
-            clazz.key = task.classKey;
-            clazz.classPtr = task.classPtr;
+            WatchAllSDKClass clazz = parser_(task);
             std::lock_guard<std::mutex> lock(modelMutex_);
             model_.MergeClass(clazz);
         }
@@ -277,6 +280,7 @@ private:
     WatchAllSDKWorkerQueue queue_;
     WatchAllSDKModel model_;
     mutable std::mutex modelMutex_;
+    Parser parser_;
     std::thread worker_;
     bool running_;
 };

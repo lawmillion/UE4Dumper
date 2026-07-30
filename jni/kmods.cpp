@@ -50,6 +50,90 @@ static WatchAllObjectSnapshotConfig MakeWatchAllObjectSnapshotConfig() {
     return config;
 }
 
+static WatchAllSDKClass WatchAllParseSDKClassTask(const WatchAllSDKClassTask &task) {
+    WatchAllSDKClass clazz;
+    clazz.key = task.classKey;
+    clazz.classPtr = task.classPtr;
+
+    if (!sdkIsValidUStruct(task.classPtr)) {
+        return clazz;
+    }
+
+    list<kaddr> recurrce;
+    kaddr child = UStruct::getChildProperties(task.classPtr);
+    int fieldGuard = 0;
+    while (child) {
+        if (sdkGuardExceeded("watch-fields", task.classPtr, fieldGuard++) || !sdkIsValidFField(child)) {
+            break;
+        }
+
+        WatchAllSDKField field;
+        field.name = FField::getName(child);
+        field.type = resolveProp423(recurrce, child);
+        field.nativeOffset = UProperty::getOffset(child);
+        field.size = UProperty::getElementSize(child);
+        field.arrayDim = UProperty::getArrayDim(child);
+        field.propertyFlags = UProperty::getPropertyFlags(child);
+        if (isEqual(FField::getClassName(child), "BoolProperty")) {
+            field.byteOffset = UBoolProperty::getByteOffset(child);
+            field.byteMask = UBoolProperty::getByteMask(child);
+            field.fieldMask = UBoolProperty::getFieldMask(child);
+        }
+        clazz.fields.push_back(field);
+        child = FField::getNext(child);
+    }
+
+    kaddr func = UStruct::getChildren(task.classPtr);
+    int funcGuard = 0;
+    while (func) {
+        if (sdkGuardExceeded("watch-functions", task.classPtr, funcGuard++) || !sdkIsValidUField(func)) {
+            break;
+        }
+
+        const string functionClass = UObject::getClassName(func);
+        if (isStartWith(functionClass, "Function") || isEqual(functionClass, "DelegateFunction")) {
+            WatchAllSDKFunction function;
+            function.name = UObject::getName(func);
+            function.returnType = "void";
+            function.functionFlags = UFunction::getFunctionFlags(func);
+            kaddr nativeFunc = UFunction::getFunc(func);
+            function.rva = nativeFunc > libbase ? nativeFunc - libbase : 0;
+
+            string params;
+            kaddr param = UStruct::getChildProperties(func);
+            int paramGuard = 0;
+            while (param) {
+                if (sdkGuardExceeded("watch-function-params", func, paramGuard++) || !sdkIsValidFField(param)) {
+                    break;
+                }
+                uint64 flags = UProperty::getPropertyFlags(param);
+                if ((flags & 0x0000000000000400) == 0x0000000000000400) {
+                    function.returnType = resolveProp423(recurrce, param);
+                } else {
+                    if (!params.empty()) {
+                        params += ", ";
+                    }
+                    if ((flags & 0x0000000000000100) == 0x0000000000000100) {
+                        params += "out ";
+                    }
+                    if ((flags & 0x0000000000000002) == 0x0000000000000002) {
+                        params += "const ";
+                    }
+                    params += resolveProp423(recurrce, param);
+                    params += " ";
+                    params += FField::getName(param);
+                }
+                param = FField::getNext(param);
+            }
+            function.parameterSignature = params;
+            clazz.functions.push_back(function);
+        }
+        func = UField::getNext(func);
+    }
+
+    return clazz;
+}
+
 using namespace std;
 
 const char *short_options = "hlrfnsabcdevi:j:p:o:g:u:w:";
@@ -98,7 +182,7 @@ int RunWatchAll(const string &outputpath, int intervalSeconds) {
 
     WatchAllObjectArraySnapshot snapshot;
     WatchAllObjectRecordStore objectRecords;
-    WatchAllSDKWorker sdkWorker;
+    WatchAllSDKWorker sdkWorker(WatchAllParseSDKClassTask);
     sdkWorker.Start();
     ProcessMemoryReader reader;
     WatchAllObjectSnapshotConfig snapshotConfig = MakeWatchAllObjectSnapshotConfig();
