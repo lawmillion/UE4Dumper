@@ -108,8 +108,20 @@ static inline void WatchAllCleanupTmps(const std::vector<std::string> &paths) {
     }
 }
 
+template<typename AliveChecker>
+static inline WatchAllOutputResult WatchAllWriteFinalOutputs(const std::string &outputDir,
+                                                             const WatchAllOutputBundle &bundle,
+                                                             AliveChecker isAlive);
+
 static inline WatchAllOutputResult WatchAllWriteFinalOutputs(const std::string &outputDir,
                                                              const WatchAllOutputBundle &bundle) {
+    return WatchAllWriteFinalOutputs(outputDir, bundle, []() { return true; });
+}
+
+template<typename AliveChecker>
+static inline WatchAllOutputResult WatchAllWriteFinalOutputs(const std::string &outputDir,
+                                                             const WatchAllOutputBundle &bundle,
+                                                             AliveChecker isAlive) {
     WatchAllOutputResult result;
     if (!WatchAllPathIsDirectory(outputDir)) {
         result.error = std::string("output directory not found: ") + outputDir;
@@ -137,13 +149,65 @@ static inline WatchAllOutputResult WatchAllWriteFinalOutputs(const std::string &
         }
     }
 
+    std::vector<std::string> backupPaths;
+    std::vector<std::string> finalPaths;
+    backupPaths.reserve(4);
+    finalPaths.reserve(4);
     for (const auto &file : files) {
-        const std::string tmpPath = WatchAllJoinOutputPath(outputDir, std::string(file.name) + ".watch-all.tmp");
-        const std::string finalPath = WatchAllJoinOutputPath(outputDir, file.name);
-        if (!WatchAllRenameFile(tmpPath, finalPath, result.error)) {
+        finalPaths.push_back(WatchAllJoinOutputPath(outputDir, file.name));
+        backupPaths.push_back(WatchAllJoinOutputPath(outputDir, std::string(file.name) + ".watch-all.bak"));
+    }
+
+    for (const auto &backupPath : backupPaths) {
+        remove(backupPath.c_str());
+    }
+
+    for (size_t i = 0; i < finalPaths.size(); ++i) {
+        if (!isAlive()) {
+            result.aborted = true;
+            result.error = "pid disappeared during output publish";
             WatchAllCleanupTmps(tmpPaths);
+            for (size_t r = 0; r < i; ++r) {
+                rename(backupPaths[r].c_str(), finalPaths[r].c_str());
+            }
             return result;
         }
+        if (rename(finalPaths[i].c_str(), backupPaths[i].c_str()) != 0 && errno != ENOENT) {
+            result.error = std::string("backup ") + finalPaths[i] + " -> " + backupPaths[i] + ": " + strerror(errno);
+            WatchAllCleanupTmps(tmpPaths);
+            for (size_t r = 0; r < i; ++r) {
+                rename(backupPaths[r].c_str(), finalPaths[r].c_str());
+            }
+            return result;
+        }
+    }
+
+    size_t renamed = 0;
+    for (; renamed < 4; ++renamed) {
+        if (!isAlive()) {
+            result.aborted = true;
+            result.error = "pid disappeared during output publish";
+            break;
+        }
+        const std::string tmpPath = WatchAllJoinOutputPath(outputDir, std::string(files[renamed].name) + ".watch-all.tmp");
+        if (!WatchAllRenameFile(tmpPath, finalPaths[renamed], result.error)) {
+            break;
+        }
+    }
+
+    if (renamed != 4) {
+        for (size_t i = 0; i < renamed; ++i) {
+            remove(finalPaths[i].c_str());
+        }
+        for (size_t i = 0; i < finalPaths.size(); ++i) {
+            rename(backupPaths[i].c_str(), finalPaths[i].c_str());
+        }
+        WatchAllCleanupTmps(tmpPaths);
+        return result;
+    }
+
+    for (const auto &backupPath : backupPaths) {
+        remove(backupPath.c_str());
     }
 
     const int dirFd = open(outputDir.c_str(), O_RDONLY);
@@ -155,16 +219,23 @@ static inline WatchAllOutputResult WatchAllWriteFinalOutputs(const std::string &
     return result;
 }
 
+template<typename AliveChecker>
 static inline WatchAllOutputResult WatchAllFinalizeOutputs(const std::string &outputDir,
                                                            const WatchAllOutputBundle &bundle,
-                                                           bool pidAlive) {
+                                                           AliveChecker isAlive) {
     WatchAllOutputResult result;
-    if (!pidAlive) {
+    if (!isAlive()) {
         result.aborted = true;
         result.error = "pid disappeared; output skipped";
         return result;
     }
-    return WatchAllWriteFinalOutputs(outputDir, bundle);
+    return WatchAllWriteFinalOutputs(outputDir, bundle, isAlive);
+}
+
+static inline WatchAllOutputResult WatchAllFinalizeOutputs(const std::string &outputDir,
+                                                           const WatchAllOutputBundle &bundle,
+                                                           bool pidAlive) {
+    return WatchAllFinalizeOutputs(outputDir, bundle, [pidAlive]() { return pidAlive; });
 }
 
 static inline std::string WatchAllJsonEscape(const std::string &value) {

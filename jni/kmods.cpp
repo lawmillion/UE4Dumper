@@ -221,7 +221,7 @@ int RunWatchAll(const string &outputpath, int intervalSeconds) {
                 }
             }
 
-            const uint32 stringScanLimit = std::min<uint32>(GNameLimit, snapshot.LastNumElements() + 1024);
+            const uint32 stringScanLimit = GNameLimit;
             const size_t mergedStrings = WatchAllMergeStringRange(strings, reader, 0, stringScanLimit);
 
             cout << "watch-all: objects=" << snapshot.LastNumElements()
@@ -259,7 +259,7 @@ int RunWatchAll(const string &outputpath, int intervalSeconds) {
     }
 
     WatchAllOutputBundle bundle = WatchAllBuildOutputBundle(strings, objectRecords.Records(), sdkWorker.ModelSnapshot());
-    WatchAllOutputResult output = WatchAllFinalizeOutputs(outputpath, bundle, true);
+    WatchAllOutputResult output = WatchAllFinalizeOutputs(outputpath, bundle, []() { return PidAlive(target_pid); });
     if (!output.ok) {
         cout << "watch-all: output failed; old files preserved: " << output.error << endl;
         return -1;

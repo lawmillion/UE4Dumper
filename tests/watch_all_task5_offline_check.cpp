@@ -120,12 +120,64 @@ static void test_pid_abort_skips_output() {
     assert(ReadFile(dir + "/SDK_index.json") == "old index");
 }
 
+static void test_pid_abort_during_backup_preserves_old_files() {
+    const std::string dir = TempDir("pid_abort_backup");
+    WriteFile(dir + "/Strings.txt", "old strings");
+    WriteFile(dir + "/Objects.txt", "old objects");
+    WriteFile(dir + "/SDK.txt", "old sdk");
+    WriteFile(dir + "/SDK_index.json", "old index");
+
+    WatchAllOutputBundle bundle;
+    bundle.strings = "new strings";
+    bundle.objects = "new objects";
+    bundle.sdk = "new sdk";
+    bundle.sdkIndexJson = "new index";
+
+    int checks = 0;
+    WatchAllOutputResult result = WatchAllFinalizeOutputs(dir, bundle, [&checks]() {
+        return checks++ < 2;
+    });
+    assert(!result.ok);
+    assert(result.aborted);
+    assert(ReadFile(dir + "/Strings.txt") == "old strings");
+    assert(ReadFile(dir + "/Objects.txt") == "old objects");
+    assert(ReadFile(dir + "/SDK.txt") == "old sdk");
+    assert(ReadFile(dir + "/SDK_index.json") == "old index");
+}
+
+static void test_pid_abort_during_publish_preserves_old_files() {
+    const std::string dir = TempDir("pid_abort_publish");
+    WriteFile(dir + "/Strings.txt", "old strings");
+    WriteFile(dir + "/Objects.txt", "old objects");
+    WriteFile(dir + "/SDK.txt", "old sdk");
+    WriteFile(dir + "/SDK_index.json", "old index");
+
+    WatchAllOutputBundle bundle;
+    bundle.strings = "new strings";
+    bundle.objects = "new objects";
+    bundle.sdk = "new sdk";
+    bundle.sdkIndexJson = "new index";
+
+    int checks = 0;
+    WatchAllOutputResult result = WatchAllFinalizeOutputs(dir, bundle, [&checks]() {
+        return checks++ < 5;
+    });
+    assert(!result.ok);
+    assert(result.aborted);
+    assert(ReadFile(dir + "/Strings.txt") == "old strings");
+    assert(ReadFile(dir + "/Objects.txt") == "old objects");
+    assert(ReadFile(dir + "/SDK.txt") == "old sdk");
+    assert(ReadFile(dir + "/SDK_index.json") == "old index");
+}
+
 int main() {
     test_strings_merge_by_index_and_sort_stable();
     test_interval_sleep_never_negative();
     test_atomic_publish_requires_all_tmp_success();
     test_atomic_publish_failure_preserves_old_files();
     test_pid_abort_skips_output();
+    test_pid_abort_during_backup_preserves_old_files();
+    test_pid_abort_during_publish_preserves_old_files();
     std::cout << "watch-all task 5 offline checks passed" << std::endl;
     return 0;
 }
