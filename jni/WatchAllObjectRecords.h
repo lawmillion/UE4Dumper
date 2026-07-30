@@ -33,7 +33,7 @@ struct WatchAllObjectRecord {
     std::string logicalKey;
 };
 
-static std::string WatchAllJoinPath(const std::string &outerPath, const std::string &name) {
+static inline std::string WatchAllJoinPath(const std::string &outerPath, const std::string &name) {
     if (outerPath.empty()) {
         return name;
     }
@@ -97,7 +97,7 @@ static WatchAllObjectPath WatchAllBuildOuterPath(ObjectReader &reader,
     return result;
 }
 
-static std::string WatchAllPathStateSuffix(const WatchAllObjectPath &path) {
+static inline std::string WatchAllPathStateSuffix(const WatchAllObjectPath &path) {
     std::string suffix;
     if (path.depthLimited) {
         suffix += "#depth";
@@ -160,7 +160,7 @@ static bool WatchAllBuildObjectRecord(ObjectReader &reader,
 }
 
 
-static std::string WatchAllFormatObjectRecord(const WatchAllObjectRecord &record) {
+static inline std::string WatchAllFormatObjectRecord(const WatchAllObjectRecord &record) {
     std::ostringstream out;
     out << std::hex;
     out << "[0x" << record.index << "]:" << std::endl;

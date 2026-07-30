@@ -3,6 +3,7 @@
 #include "SDK.h"
 #include "WatchAllObjects.h"
 #include "WatchAllObjectRecords.h"
+#include "WatchAllSDKModel.h"
 #include <csignal>
 
 class ProcessMemoryReader {
@@ -97,6 +98,8 @@ int RunWatchAll(const string &outputpath, int intervalSeconds) {
 
     WatchAllObjectArraySnapshot snapshot;
     WatchAllObjectRecordStore objectRecords;
+    WatchAllSDKWorker sdkWorker;
+    sdkWorker.Start();
     ProcessMemoryReader reader;
     WatchAllObjectSnapshotConfig snapshotConfig = MakeWatchAllObjectSnapshotConfig();
 
@@ -115,13 +118,16 @@ int RunWatchAll(const string &outputpath, int intervalSeconds) {
                 const WatchAllObjectRecord *record = objectRecords.AddDiff(reader, diff);
                 if (record != nullptr) {
                     ++newRecords;
+                    sdkWorker.Submit(*record);
                 }
             }
 
             cout << "watch-all: objects=" << snapshot.LastNumElements()
                  << " diffs=" << diffs.size()
                  << " records=" << objectRecords.Records().size()
-                 << " new-records=" << newRecords << endl;
+                 << " new-records=" << newRecords
+                 << " sdk-classes=" << sdkWorker.ClassCount()
+                 << " sdk-pending=" << sdkWorker.PendingCount() << endl;
             if (isVerbose) {
                 for (const auto &diff : diffs) {
                     cout << "watch-all: "
