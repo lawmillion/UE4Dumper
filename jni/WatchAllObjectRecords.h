@@ -58,6 +58,7 @@ static WatchAllObjectPath WatchAllBuildOuterPath(ObjectReader &reader,
     }
 
     size_t depth = 0;
+    visited.insert(object);
     while (outer != 0) {
         if (visited.find(outer) != visited.end()) {
             result.cycleDetected = true;
@@ -135,6 +136,10 @@ static bool WatchAllBuildObjectRecord(ObjectReader &reader,
 
     WatchAllObjectPath outerPath = WatchAllBuildOuterPath(reader, object, maxDepth);
     WatchAllObjectPath classOuterPath = WatchAllBuildOuterPath(reader, classPtr, maxDepth);
+    if (outerPath.readFailed || outerPath.depthLimited || outerPath.cycleDetected ||
+        classOuterPath.readFailed || classOuterPath.depthLimited || classOuterPath.cycleDetected) {
+        return false;
+    }
     const std::string classPath = WatchAllJoinPath(classOuterPath.value, className);
 
     record.index = diff.index;

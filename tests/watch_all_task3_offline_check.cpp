@@ -94,6 +94,30 @@ static void test_logical_dedupe_ignores_pointer_and_index() {
     assert(store.Records()[0].objectPtr == 0x2000);
 }
 
+static void test_outer_path_detects_cycle_back_to_start_object() {
+    FakeObjectReader reader;
+    reader.objects[0x1000] = {"Obj", 0x2000, 0x9000};
+    reader.objects[0x2000] = {"Outer1", 0x1000, 0x9000};
+
+    WatchAllObjectPath path = WatchAllBuildOuterPath(reader, 0x1000, 8);
+
+    assert(path.value == "Outer1");
+    assert(path.cycleDetected);
+}
+
+static void test_record_rejects_incomplete_outer_path() {
+    FakeObjectReader reader;
+    reader.objects[0x1000] = {"Package", 0, 0x9000};
+    reader.objects[0x2000] = {"Actor", 0x3000, 0x8000};
+    reader.objects[0x8000] = {"BlueprintGeneratedClass", 0x4000, 0x9000};
+    reader.objects[0x4000] = {"Engine", 0, 0x9000};
+    reader.objects[0x9000] = {"Class", 0, 0x9000};
+
+    WatchAllObjectRecordStore store;
+    assert(!store.AddDiff(reader, Diff(1, 0x2000)));
+    assert(store.Records().empty());
+}
+
 static void test_formats_object_record_like_legacy_objects_txt() {
     WatchAllObjectRecord record{};
     record.index = 0x2a;
@@ -126,8 +150,10 @@ static void test_same_name_different_outer_does_not_merge() {
 int main() {
     test_outer_path_has_depth_limit();
     test_outer_path_detects_cycles();
+    test_outer_path_detects_cycle_back_to_start_object();
     test_logical_dedupe_ignores_pointer_and_index();
     test_same_name_different_outer_does_not_merge();
+    test_record_rejects_incomplete_outer_path();
     test_formats_object_record_like_legacy_objects_txt();
     std::cout << "watch-all task 3 offline checks passed" << std::endl;
     return 0;
