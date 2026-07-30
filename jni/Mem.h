@@ -120,6 +120,12 @@ T Read(kaddr address) {
     return data;
 }
 
+// Strict typed reader for watch mode. Never use failed data as a valid sample.
+template<typename T>
+bool TryRead(kaddr address, T &out) {
+    return TryReadBuffer(reinterpret_cast<void *>(address), reinterpret_cast<void *>(&out), sizeof(T));
+}
+
 template<typename T>
 T Read(kaddr address, T def) {
     T data = def;

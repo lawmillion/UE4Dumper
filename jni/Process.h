@@ -53,6 +53,12 @@ bool vm_readv(void *address, void *buffer, size_t size) {
     return pvm(address, buffer, size, false);
 }
 
+// Strict Process Virtual Memory Reader: succeeds only when all requested bytes are read.
+bool TryReadBuffer(void *address, void *buffer, size_t size) {
+    ssize_t bytes = pvm_partial(address, buffer, size, false);
+    return bytes == (ssize_t) size;
+}
+
 //Process Virtual Memory Writer
 bool vm_writev(void *address, void *buffer, size_t size) {
     return pvm(address, buffer, size, true);

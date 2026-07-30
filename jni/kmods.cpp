@@ -1,10 +1,56 @@
 #include "kmods.h"
 #include "Offsets.h"
 #include "SDK.h"
+#include <csignal>
 
 using namespace std;
 
 const char *short_options = "hlrfnsabcdevi:j:p:o:g:u:w:";
+
+enum LongOnlyOption {
+    OPT_WATCH_ALL = 1000,
+    OPT_INTERVAL
+};
+
+static volatile sig_atomic_t gWatchStopRequested = 0;
+
+void HandleWatchSigint(int) {
+    gWatchStopRequested = 1;
+}
+
+int RunWatchAll(const string &outputpath, int intervalSeconds) {
+    (void) outputpath;
+
+    target_pid = find_pid(pkg.c_str());
+    if (target_pid == -1) {
+        cout << "watch-all: Can't find the process" << endl;
+        return -1;
+    }
+    cout << "watch-all: Process name: " << pkg.c_str() << ", Pid: " << target_pid << endl;
+
+    libbase = get_module_base(lib_name);
+    if (libbase == 0) {
+        cout << "watch-all: Can't find Library: " << lib_name << endl;
+        return -1;
+    }
+    cout << "watch-all: Base Address of " << lib_name << " Found At "
+         << setbase(16) << libbase << setbase(10) << endl;
+
+    signal(SIGINT, HandleWatchSigint);
+    cout << "watch-all: bound to current PID/libUE4.so; interval=" << intervalSeconds
+         << "s. Full scan is not implemented in Task 1." << endl;
+
+    while (!gWatchStopRequested) {
+        if (!PidAlive(target_pid)) {
+            cout << "watch-all: session aborted; game PID disappeared" << endl;
+            return -1;
+        }
+        sleep(intervalSeconds);
+    }
+
+    cout << "watch-all: stopped by SIGINT" << endl;
+    return 0;
+}
 const struct option long_options[] = {
         {"help",       no_argument,       nullptr, 'h'},
         {"lib",        no_argument,       nullptr, 'l'},
@@ -25,6 +71,8 @@ const struct option long_options[] = {
         {"gname",      required_argument, nullptr, 'g'},
         {"guobj",      required_argument, nullptr, 'u'},
         {"gworld",     required_argument, nullptr, 'w'},
+        {"watch-all",  no_argument,       nullptr, OPT_WATCH_ALL},
+        {"interval",   required_argument, nullptr, OPT_INTERVAL},
         {nullptr, 0,                      nullptr, 0}
 };
 
@@ -65,6 +113,8 @@ void Usage() {
     printf("  --derefguobj(Optional) <true/false> De-Reference GUObject Address(Default: false)\n");
     printf("  --package <packageName>             Package Name of App(Default: com.tencent.ig)\n");
     printf("  --output <outputPath>               File Output path\n");
+    printf("  --watch-all                         Run independent watch-all mode\n");
+    printf("  --interval <seconds>                watch-all polling interval(Default: 1)\n");
     printf("  --help                              Display this information\n");
 }
 
@@ -87,7 +137,9 @@ int main(int argc, char *argv[]) {
             isStrDump = false,
             isSdkDump = false,
             isSdkDump2 = false,
-            isActorDump = false;
+            isActorDump = false,
+            isWatchAll = false;
+    int watchIntervalSeconds = 1;
 
     while ((c = getopt_long(argc, argv, short_options, long_options, nullptr)) != -1) {
         switch (c) {
@@ -145,6 +197,15 @@ int main(int argc, char *argv[]) {
             case 'j':
                 deRefGUObjectArray = isEqual(optarg, "true");
                 break;
+            case OPT_WATCH_ALL:
+                isWatchAll = true;
+                break;
+            case OPT_INTERVAL:
+                watchIntervalSeconds = atoi(optarg);
+                if (watchIntervalSeconds < 1) {
+                    isValidArg = false;
+                }
+                break;
             default:
                 isValidArg = false;
                 break;
@@ -168,6 +229,15 @@ int main(int argc, char *argv[]) {
     isPGLite = isPUBGLite();
     isPUBGCN = isGameOfPeace();
     isPUBGNS = isPUBGNewState();
+
+    if (isWatchAll) {
+        if (!isValidArg) {
+            printf("Wrong Arguments, Please Check!!\n");
+            Usage();
+            return -1;
+        }
+        return RunWatchAll(outputpath, watchIntervalSeconds);
+    }
 
     if (!isValidArg ||
         (!isLibDump && !isObjsDump && !isStrDump && !isSdkDump && !isSdkDump2 && !isActorDump)) {

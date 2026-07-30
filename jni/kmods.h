@@ -44,6 +44,15 @@ bool deRefGUObjectArray = false;
 string pkg("com.tencent.ig");
 static const char *lib_name = "libUE4.so";
 
+bool PidAlive(pid_t pid) {
+    if (pid <= 0) {
+        return false;
+    }
+    char procPath[32];
+    snprintf(procPath, sizeof(procPath), "/proc/%d", pid);
+    return access(procPath, F_OK) == 0;
+}
+
 struct ModuleMapSegment {
     kaddr start;
     kaddr end;
