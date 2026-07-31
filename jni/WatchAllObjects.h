@@ -104,7 +104,8 @@ public:
             return false;
         }
 
-        previous_.resize(numElements);
+        std::vector<WatchAllObjectSlot> nextPrevious = previous_;
+        nextPrevious.resize(numElements);
         std::vector<bool> chunkReadComplete(chunkCount, false);
 
         for (uint32 chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex) {
@@ -119,6 +120,9 @@ public:
             std::vector<WatchAllObjectSlot> current(elementsInChunk);
             WatchAllChunkReadResult readResult = ReadChunkItems(config, reader, chunk, current, 0, elementsInChunk);
             chunkReadComplete[chunkIndex] = readResult.Complete();
+            if (!chunkReadComplete[chunkIndex]) {
+                continue;
+            }
 
             for (uint32 offset = 0; offset < elementsInChunk; ++offset) {
                 if (!current[offset].valid) {
@@ -127,29 +131,31 @@ public:
 
                 const uint32 index = firstIndex + offset;
                 const WatchAllObjectItem &sample = current[offset].item;
+                const bool hadPrevious = index < previous_.size() && previous_[index].valid;
+                const WatchAllObjectItem previousItem = hadPrevious ? previous_[index].item : WatchAllObjectItem{};
                 if (!IsLiveItem(sample)) {
-                    previous_[index].valid = false;
-                    previous_[index].item = sample;
+                    nextPrevious[index].valid = false;
+                    nextPrevious[index].item = sample;
                     continue;
                 }
 
-                if (!previous_[index].valid) {
+                if (!hadPrevious) {
                     WatchAllObjectDiff diff{};
                     diff.index = index;
                     diff.kind = WatchAllObjectDiffKind::Added;
                     diff.current = sample;
                     diffs.push_back(diff);
-                } else if (pointerChanged || !SameItem(previous_[index].item, sample)) {
+                } else if (pointerChanged || !SameItem(previousItem, sample)) {
                     WatchAllObjectDiff diff{};
                     diff.index = index;
                     diff.kind = WatchAllObjectDiffKind::Changed;
-                    diff.previous = previous_[index].item;
+                    diff.previous = previousItem;
                     diff.current = sample;
                     diffs.push_back(diff);
                 }
 
-                previous_[index].valid = true;
-                previous_[index].item = sample;
+                nextPrevious[index].valid = true;
+                nextPrevious[index].item = sample;
             }
         }
 
@@ -161,6 +167,7 @@ public:
                 nextChunkPointers[chunkIndex] = chunkPointers_[chunkIndex];
             }
         }
+        previous_.swap(nextPrevious);
         chunkPointers_.swap(nextChunkPointers);
         lastNumElements_ = numElements;
         return true;

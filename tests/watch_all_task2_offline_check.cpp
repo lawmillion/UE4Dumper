@@ -213,11 +213,44 @@ static void test_last_chunk_reads_only_valid_elements() {
     assert(sawTrimmedRead);
 }
 
+static void test_partial_chunk_read_does_not_mutate_any_slot() {
+    FakeReader reader;
+    WatchAllObjectArraySnapshot snapshot;
+    const kaddr gu = 0x150000;
+    const kaddr table = 0x260000;
+    const kaddr chunk = 0x370000;
+    kaddr chunks[] = {chunk};
+    PutHeader(reader, gu, table, 2);
+    reader.Put(table, chunks, sizeof(chunks));
+    PutItems(reader, chunk, {Item(0x601, 1, 0, 1), Item(0x602, 1, 0, 2)});
+
+    std::vector<WatchAllObjectDiff> diffs;
+    assert(snapshot.Capture(Config(gu), reader, diffs));
+    assert(diffs.size() == 2);
+
+    PutItems(reader, chunk, {Item(0x701, 1, 0, 3), Item(0x702, 1, 0, 4)});
+    reader.failByAddress[chunk] = 1;
+    reader.failByAddress[chunk + sizeof(WatchAllObjectItem)] = 8;
+    diffs.clear();
+    assert(snapshot.Capture(Config(gu), reader, diffs));
+    assert(diffs.empty());
+
+    reader.failByAddress.clear();
+    diffs.clear();
+    assert(snapshot.Capture(Config(gu), reader, diffs));
+    assert(diffs.size() == 2);
+    assert(diffs[0].index == 0 && diffs[0].kind == WatchAllObjectDiffKind::Changed);
+    assert(diffs[0].previous.object == 0x601);
+    assert(diffs[1].index == 1 && diffs[1].kind == WatchAllObjectDiffKind::Changed);
+    assert(diffs[1].previous.object == 0x602);
+}
+
 int main() {
     test_detects_added_and_changed_slots();
     test_failed_batch_does_not_overwrite_previous_slot();
     test_chunk_pointer_change_survives_failed_rebuild_attempt();
     test_failed_chunk_read_keeps_pointer_baseline();
+    test_partial_chunk_read_does_not_mutate_any_slot();
     test_last_chunk_reads_only_valid_elements();
     std::cout << "watch-all task 2 offline checks passed" << std::endl;
     return 0;

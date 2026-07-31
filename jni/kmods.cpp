@@ -158,6 +158,44 @@ void HandleWatchSigint(int) {
     gWatchStopRequested = 1;
 }
 
+static bool WatchAllShouldAbortScan(WatchAllSDKWorker &sdkWorker) {
+    if (gWatchStopRequested) {
+        return true;
+    }
+    if (!PidAlive(target_pid)) {
+        sdkWorker.Stop();
+        cout << "watch-all: session aborted; game PID disappeared" << endl;
+        return true;
+    }
+    return false;
+}
+
+static bool DumpModuleLegacySpan(const string &outPath, kaddr startAddr, size_t libSize, bool fastDump) {
+    ofstream out(outPath, ofstream::out | ofstream::binary);
+    if (!out.is_open()) {
+        cout << "Can't Output File" << endl;
+        return false;
+    }
+
+    if (fastDump) {
+        auto *buffer = new uint8_t[libSize];
+        memset(buffer, '\0', libSize);
+        vm_readv((void *) startAddr, buffer, libSize);
+        out.write((char *) buffer, libSize);
+        delete[] buffer;
+    } else {
+        char buffer[1];
+        while (libSize != 0) {
+            vm_readv((void *) (startAddr++), buffer, 1);
+            out.write(buffer, 1);
+            --libSize;
+        }
+    }
+
+    out.close();
+    return true;
+}
+
 int RunWatchAll(const string &outputpath, int intervalSeconds) {
     target_pid = find_pid(pkg.c_str());
     if (target_pid == -1) {
@@ -211,9 +249,14 @@ int RunWatchAll(const string &outputpath, int intervalSeconds) {
         std::vector<WatchAllObjectDiff> diffs;
         if (!snapshot.Capture(snapshotConfig, reader, diffs)) {
             cout << "watch-all: GUObjectArray snapshot failed; keeping previous baseline" << endl;
+        } else if (WatchAllShouldAbortScan(sdkWorker)) {
+            break;
         } else {
             size_t newRecords = 0;
             for (const auto &diff : diffs) {
+                if (WatchAllShouldAbortScan(sdkWorker)) {
+                    break;
+                }
                 const WatchAllObjectRecord *record = objectRecords.AddDiff(reader, diff);
                 if (record != nullptr) {
                     ++newRecords;
@@ -221,8 +264,12 @@ int RunWatchAll(const string &outputpath, int intervalSeconds) {
                 }
             }
 
-            const uint32 stringScanLimit = GNameLimit;
-            const size_t mergedStrings = WatchAllMergeStringRange(strings, reader, 0, stringScanLimit);
+            size_t mergedStrings = 0;
+            const uint32 stringBatchSize = 1024;
+            for (uint32 begin = 0; begin < GNameLimit && !WatchAllShouldAbortScan(sdkWorker); begin += stringBatchSize) {
+                const uint32 end = std::min<uint32>(begin + stringBatchSize, GNameLimit);
+                mergedStrings += WatchAllMergeStringRange(strings, reader, begin, end);
+            }
 
             cout << "watch-all: objects=" << snapshot.LastNumElements()
                  << " diffs=" << diffs.size()
@@ -481,18 +528,29 @@ int main(int argc, char *argv[]) {
          << endl;
 
     if (isLibDump) {
-        kaddr dumpBase = 0;
-        kaddr dumpEnd = 0;
+        //Lib End Address
+        kaddr start_addr = libbase;
+        kaddr end_addr = get_module_end(lib_name);
+        if (end_addr == 0) {
+            cout << "Can't find End of Library: " << lib_name << endl;
+            return -1;
+        }
+        cout << "End Address of " << lib_name << " Found At " << setbase(16) << end_addr
+             << setbase(10) << endl;
+
+        //Lib Dump
+        size_t libsize = (end_addr - libbase);
+        cout << "Lib Size: " << libsize << endl;
 
         if (isRawDump) {
             string rawPath = outputpath + "/" + lib_name;
-            if (!dump_module_by_maps(lib_name, rawPath, dumpBase, dumpEnd)) {
-                cout << "Raw dump completed with read gaps; output keeps zero-filled gaps" << endl;
+            if (!DumpModuleLegacySpan(rawPath, start_addr, libsize, isFastDump)) {
+                return -1;
             }
         } else {
             string tempPath = outputpath + "/KTemp.dat";
-            if (!dump_module_by_maps(lib_name, tempPath, dumpBase, dumpEnd)) {
-                cout << "Dump completed with read gaps; rebuilding may still be incomplete" << endl;
+            if (!DumpModuleLegacySpan(tempPath, start_addr, libsize, isFastDump)) {
+                return -1;
             }
 
             //SoFixer Code//
@@ -501,12 +559,12 @@ int main(int argc, char *argv[]) {
 #if defined(__LP64__)
             string outPath = outputpath + "/" + lib_name;
 
-            fix_so(tempPath.c_str(), outPath.c_str(), dumpBase);
+            fix_so(tempPath.c_str(), outPath.c_str(), libbase);
 #else
             ElfReader elf_reader;
 
             elf_reader.setDumpSoFile(true);
-            elf_reader.setDumpSoBaseAddr(dumpBase);
+            elf_reader.setDumpSoBaseAddr(libbase);
 
             auto file = fopen(tempPath.c_str(), "rb");
             if (nullptr == file) {
