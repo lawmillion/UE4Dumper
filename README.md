@@ -2,6 +2,11 @@
 Unreal Engine 4 Dumper for Android Devices, Dump Lib libUE4.so from Memory of Game Process and Generate Structure SDK of Supported Game in Android. You can Find Latest Dumped SDK from [HERE](https://github.com/kp7742/UE4Dumper/tree/master/SDKs/)
 
 ## Changelog
+- v0.21-watch-all:
+    - 1) Added independent `--watch-all` mode for long-running UE4 object capture
+    - 2) Added ARM64 UE 4.23+ chunked `GUObjectArray` polling support
+    - 3) Added final atomic output for `Strings.txt`, `Objects.txt`, `SDK.txt`, and `SDK_index.json`
+    - 4) Old one-shot dump modes remain unchanged
 - v0.21:
     - 1) Merged code from private repo
     - 2) Added Support for Farlight84 Mobile
@@ -75,6 +80,7 @@ Unreal Engine 4 Dumper for Android Devices, Dump Lib libUE4.so from Memory of Ga
 - Dumping of Game Structure SDK file(Need to Find Pointers Manually)
 - Support Fast Dumping(Might Miss some data)
 - Support SDK Dumping for UE4 Based Android Games
+- Support independent watch-all mode for long-running object/string/SDK capture
 - Tested on 32bit and 64bit PUBG Mobile Series
 
 ## Note
@@ -93,6 +99,11 @@ Unreal Engine 4 Dumper for Android Devices, Dump Lib libUE4.so from Memory of Ga
 - Get Either Root Shell through Adb or Terminal Apps(type and run: 'su') or Normal Shell into Virtual Space via Terminal Apps in that folder
 - Give it executable permission with either 'chmod +x ue4dumper' or 'chmod 755 ue4dumper'
 - Run './ue4dumper -h' For Usage Help
+- Watch-all example for ARM64 UE 4.23+ games:
+    ```
+    ./ue4dumper64 --package <packageName> --newue --watch-all --gname <GNamesOffset> --guobj <GUObjectArrayOffset> --interval 1 --output /data/local/tmp
+    ```
+- Stop watch-all with Ctrl+C. It writes final `Strings.txt`, `Objects.txt`, `SDK.txt`, and `SDK_index.json` only during clean shutdown. If game process exits first, output is skipped and old files are preserved.
 	```
     UE4Dumper v0.21 <==> Made By KMODs(kp7742)
     Usage: ./ue4dumper <option(s)>
@@ -130,6 +141,8 @@ Unreal Engine 4 Dumper for Android Devices, Dump Lib libUE4.so from Memory of Ga
     --derefguobj(Optional) <true/false> De-Reference GUObject Address(Default: false)
     --package <packageName>             Package Name of App(Default: com.tencent.ig)
     --output <outputPath>               File Output path
+    --watch-all                         Run independent watch-all mode
+    --interval <seconds>                watch-all polling interval(Default: 1)
     --help                              Display this information
 	```
 	
